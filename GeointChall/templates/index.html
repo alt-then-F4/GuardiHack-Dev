@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>GEOINT Challenge</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --primary: #2563eb;
+            --surface: #ffffff;
+            --text: #1e293b;
+        }
+
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, system-ui, sans-serif; background: #000; }
+        
+        /* CONTENEUR DE L'IMAGE VERROUILLÉ */
+        #viewport {
+            width: 100vw; height: 100vh;
+            overflow: hidden; background: #000;
+            display: flex; align-items: center; justify-content: center;
+        }
+        
+        #challenge-image {
+            width: 100%; height: 100%;
+            object-fit: cover;
+            transition: transform 0.1s ease-out;
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .zoomable { cursor: grab; }
+        .zoomable:active { cursor: grabbing; }
+
+        /* ZONE UI EN BAS À DROITE */
+        #interface-anchor {
+            position: absolute; bottom: 30px; right: 30px;
+            z-index: 1000; display: flex; flex-direction: column; align-items: flex-end;
+        }
+
+        #toggle-visibility {
+            width: 40px; height: 40px; background: var(--surface); border: none;
+            border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1001; margin-bottom: 15px;
+            transition: transform 0.2s;
+        }
+        #toggle-visibility:hover { transform: scale(1.1); }
+        #toggle-visibility svg { width: 22px; height: 22px; fill: var(--text); }
+
+        #sliding-content { display: flex; flex-direction: column; gap: 12px; transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s; }
+        
+        /* GESTION DU MASQUAGE VIA LE BODY */
+        body.ui-hidden #sliding-content { transform: translateY(100px); opacity: 0; pointer-events: none; }
+        body.ui-hidden #cooldown-timer { display: none !important; } /* Masque le chrono de force */
+        body.ui-hidden #credits { opacity: 0; }
+
+        /* MINI-MAP AVEC SYSTEME DE ZOOM DE LA V1 */
+        #map-container {
+            width: 240px; height: 180px; background: var(--surface); padding: 5px;
+            border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+            transition: width 0.3s ease, height 0.3s ease; overflow: hidden;
+        }
+        #sliding-content:hover #map-container { width: 500px; height: 380px; }
+        #map { width: 100%; height: 100%; border-radius: 8px; }
+
+        #btn-submit {
+            width: 100%; padding: 14px; background: var(--primary); color: white;
+            border: none; border-radius: 10px; font-weight: 600; font-size: 14px;
+            cursor: pointer; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+            display: none; transition: all 0.2s;
+        }
+        #btn-submit:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+        #btn-submit:disabled { background: #94a3b8; cursor: not-allowed; box-shadow: none; }
+
+        /* CHRONOMETRE FLUIDE */
+        #cooldown-timer { position: absolute; top: 40px; left: 50%; transform: translateX(-50%); z-index: 2000; display: none; align-items: center; justify-content: center; }
+        .progress-ring { transform: rotate(-90deg); }
+        #progress-circle { transition: stroke-dashoffset 1s linear, stroke 0.5s ease; stroke-linecap: round; }
+        #cooldown-text { position: absolute; color: white; font-weight: 800; font-size: 22px; text-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+
+        /* MODALE */
+        #modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: center; z-index: 3000; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        #modal-overlay.active { opacity: 1; pointer-events: auto; }
+        #modal-content { background: white; padding: 35px; border-radius: 20px; max-width: 420px; width: 85%; text-align: center; box-shadow: 0 25px 60px rgba(0,0,0,0.4); transform: scale(0.9); transition: 0.3s; }
+        #modal-overlay.active #modal-content { transform: scale(1); }
+        #modal-title { font-size: 22px; font-weight: 800; color: #0f172a; margin-bottom: 12px; }
+        #modal-text { font-size: 16px; color: #475569; margin-bottom: 25px; line-height: 1.6; }
+        .modal-btn { width: 100%; padding: 14px; border: none; border-radius: 12px; background: #0f172a; color: white; font-weight: 600; cursor: pointer; }
+
+        #credits { position: absolute; bottom: 20px; left: 30px; color: white; font-size: 11px; opacity: 0.5; pointer-events: none; transition: opacity 0.3s; }
+    </style>
+</head>
+<body>
+
+    <div id="viewport">
+	<img id="challenge-image" src="/static/{{ config.image_path }}">
+    </div>
+
+    <div id="credits">Ce problème a été généreusement soumis par <strong>{{ config.author }}</strong></div>    
+
+    <div id="cooldown-timer">
+        <svg class="progress-ring" width="110" height="110">
+            <circle stroke="rgba(255,255,255,0.15)" stroke-width="10" fill="rgba(15, 23, 42, 0.85)" r="45" cx="55" cy="55"/>
+            <circle id="progress-circle" stroke="#ef4444" stroke-width="10" fill="transparent" r="45" cx="55" cy="55" />
+        </svg>
+        <div id="cooldown-text">0:00</div>
+    </div>
+
+    <div id="interface-anchor">
+        <button id="toggle-visibility" onclick="toggleUI()">
+            <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+        </button>
+        
+        <div id="sliding-content">
+            <div id="map-container"><div id="map"></div></div>
+            <button id="btn-submit" onclick="validateGuess()">VALIDER LA POSITION</button>
+        </div>
+    </div>
+
+    <div id="modal-overlay">
+        <div id="modal-content">
+            <div id="modal-title">Notification</div>
+            <div id="modal-text">Message</div>
+            <button class="modal-btn" onclick="closeModal()">Fermer</button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // --- LOGIQUE DE ZOOM BRIDÉE ---
+        const viewport = document.getElementById('viewport');
+        const img = document.getElementById('challenge-image');
+        let scale = 1, posX = 0, posY = 0, isDragging = false, startX, startY;
+
+        viewport.onwheel = e => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            scale = Math.min(Math.max(1, scale * delta), 8);
+            if (scale > 1) viewport.classList.add('zoomable');
+            else viewport.classList.remove('zoomable');
+            updateTransform();
+        };
+
+        viewport.onmousedown = e => {
+            if (scale <= 1) return;
+            isDragging = true;
+            startX = e.clientX - posX; startY = e.clientY - posY;
+        };
+
+        window.onmousemove = e => {
+            if (!isDragging) return;
+            posX = e.clientX - startX; posY = e.clientY - startY;
+            updateTransform();
+        };
+
+        window.onmouseup = () => isDragging = false;
+
+        function updateTransform() {
+            const vW = viewport.clientWidth, vH = viewport.clientHeight;
+            const maxX = (vW * scale - vW) / 2, maxY = (vH * scale - vH) / 2;
+            if (scale === 1) { posX = 0; posY = 0; } 
+            else { posX = Math.min(Math.max(posX, -maxX), maxX); posY = Math.min(Math.max(posY, -maxY), maxY); }
+            img.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
+        }
+
+        // --- INTERFACE & CARTOGRAPHIE ---
+        const map = L.map('map', { zoomControl: false }).setView([20, 0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        let selectedCoords = null, marker = null, countdownInterval = null;
+        const circle = document.getElementById('progress-circle'), circumference = 45 * 2 * Math.PI;
+        circle.style.strokeDasharray = `${circumference} ${circumference}`;
+
+        // TOGGLE PORTÉ SUR LE BODY
+        function toggleUI() {
+            document.body.classList.toggle('ui-hidden');
+            setTimeout(() => map.invalidateSize(), 400);
+        }
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            const res = await (await fetch('/check-lock')).json();
+            if (res.locked) {
+                document.getElementById('btn-submit').style.display = 'block';
+                startCooldown(res.remaining_time, res.total_duration);
+            }
+        });
+
+        map.on('click', (e) => {
+            if (document.getElementById('btn-submit').disabled) return;
+            selectedCoords = e.latlng;
+            if (marker) marker.setLatLng(selectedCoords);
+            else marker = L.marker(selectedCoords).addTo(map);
+            document.getElementById('btn-submit').style.display = 'block';
+        });
+
+        function showModal(title, text) {
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-text').innerHTML = text;
+            document.getElementById('modal-overlay').classList.add('active');
+        }
+
+        function closeModal() { document.getElementById('modal-overlay').classList.remove('active'); }
+
+        function startCooldown(rem, total) {
+            const timer = document.getElementById('cooldown-timer'), text = document.getElementById('cooldown-text'), btn = document.getElementById('btn-submit');
+            timer.style.display = 'flex'; btn.disabled = true; btn.innerText = "SYSTÈME VERROUILLÉ";
+
+            if (countdownInterval) clearInterval(countdownInterval);
+            const update = () => {
+                if (rem <= 0) {
+                    clearInterval(countdownInterval); timer.style.display = 'none';
+                    btn.disabled = false; btn.innerText = "VALIDER LA POSITION"; return;
+                }
+                text.innerText = `${Math.floor(rem/60)}:${(rem%60).toString().padStart(2,'0')}`;
+                let pct = (rem/total)*100, offset = circumference - (pct/100)*circumference;
+                circle.style.strokeDashoffset = offset;
+                circle.style.stroke = pct > 60 ? "#ef4444" : pct > 30 ? "#f59e0b" : "#10b981";
+                rem--;
+            };
+            update(); countdownInterval = setInterval(update, 1000);
+        }
+
+        async function validateGuess() {
+            const res = await (await fetch('/submit-guess', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({lat: selectedCoords.lat, lon: selectedCoords.lng})
+            })).json();
+
+            if (res.success) showModal("Félicitations", `Position trouvée.<br><br><strong>Flag:</strong> <code>${res.flag}</code>`);
+            else {
+                showModal("Échec", res.message);
+                startCooldown(res.remaining_time, res.total_duration);
+            }
+        }
+
+        const content = document.getElementById('sliding-content');
+        content.addEventListener('transitionend', () => map.invalidateSize());
+        content.addEventListener('mouseenter', () => setTimeout(() => map.invalidateSize(), 300));
+    </script>
+</body>
+</html>

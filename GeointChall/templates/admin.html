@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard Admin - Configuration GEOINT</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root { --primary: #2563eb; --bg: #f8fafc; --surface: #ffffff; --text: #0f172a; --border: #e2e8f0; }
+        body { margin: 0; padding: 40px 20px; background: var(--bg); font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: var(--text); display: flex; justify-content: center; }
+        .container { width: 100%; max-width: 900px; background: var(--surface); padding: 40px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); border: 1px solid var(--border); }
+        h1 { margin-top: 0; font-size: 24px; font-weight: 700; border-bottom: 2px solid var(--border); padding-bottom: 15px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 25px; }
+        .form-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+        label { font-weight: 600; font-size: 14px; color: #475569; }
+        input[type="text"], input[type="number"], textarea, input[type="file"] { padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fafafa; }
+        input:focus, textarea:focus { outline: none; border-color: var(--primary); background: #fff; }
+        textarea { height: 80px; resize: none; }
+        #map-selector { height: 300px; border-radius: 8px; border: 1px solid var(--border); }
+        .btn-save { grid-column: span 2; width: 100%; padding: 16px; background: var(--primary); color: white; border: none; border-radius: 10px; font-weight: 600; font-size: 16px; cursor: pointer; transition: background 0.2s; margin-top: 20px; }
+        .btn-save:hover { background: #1d4ed8; }
+        .help-text { font-size: 12px; color: #64748b; margin-top: -4px; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Création / Modification du Challenge GEOINT</h1>
+        
+        <form action="/admin" method="POST" enctype="multipart/form-data" class="grid">
+            <div>
+                <div class="form-group">
+                    <label for="title">Titre du challenge</label>
+                    <input type="text" id="title" name="title" value="{{ config.title }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="description">Description / Indices</label>
+                    <textarea id="description" name="description" required>{{ config.description }}</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="author">Auteur</label>
+                    <input type="text" id="author" name="author" value="{{ config.author }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="image">Image du challenge (.png, .jpg)</label>
+                    <input type="file" id="image" name="image" accept="image/*">
+                    <span class="help-text">Laissez vide pour conserver l'image actuelle (<code>{{ config.image_path }}</code>)</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="flag">Flag de récompense</label>
+                    <input type="text" id="flag" name="flag" value="{{ config.flag }}" required style="font-family: monospace;">
+                </div>
+            </div>
+
+            <div>
+                <div class="form-group">
+                    <label>Sélection de la cible (Cliquez sur la carte)</label>
+                    <div id="map-selector"></div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label for="true_lat">Latitude</label>
+                        <input type="number" step="any" id="true_lat" name="true_lat" value="{{ config.true_lat }}" required readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="true_lon">Longitude</label>
+                        <input type="number" step="any" id="true_lon" name="true_lon" value="{{ config.true_lon }}" required readonly>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="radius">Rayon d'acceptation (en mètres)</label>
+                    <input type="number" id="radius" name="radius" value="{{ config.radius }}" required>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-save">PUBLIER LE CHALLENGE</button>
+        </form>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Init de la carte d'administration
+        const map = L.map('map-selector').setView([{{ config.true_lat }}, {{ config.true_lon }}], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        // Placer le marqueur initial sur la solution actuelle
+        let marker = L.marker([{{ config.true_lat }}, {{ config.true_lon }}]).addTo(map);
+
+        // Event au clic pour récupérer les coordonnées exactes
+        map.on('click', function(e) {
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+            
+            document.getElementById('true_lat').value = lat;
+            document.getElementById('true_lon').value = lng;
+            
+            if (marker) {
+                marker.setLatLng(e.latlng);
+            } else {
+                marker = L.marker(e.latlng).addTo(map);
+            }
+        });
+    </script>
+</body>
+</html>
